@@ -1,800 +1,386 @@
+#include "customer.h"
+#include "utils.h"
 #include <iostream>
 #include <mysql.h>
-#include <string>
-#include <cstdio>
-#include <cstdlib>
 #include <ctime>
-
+#include <cmath>
 using namespace std;
 
-// ============ DECLARATIONS ============
-void clearScreen();
-void logoutUser(string &currentUser, string &currentRole, int &currentUserId, bool &isLoggedIn);
-
-// ============ VIEW AVAILABLE SLOTS ============
-
-void viewAvailableSlots(MYSQL *conn)
+bool isUserVIP(MYSQL *conn, int uid)
 {
-    clearScreen();
-    cout << "\n==========================================" << endl;
-    cout << "         AVAILABLE PARKING SLOTS" << endl;
-    cout << "==========================================" << endl;
-
-    string query = "SELECT ps.slot_id, ps.slot_number, pl.lot_name, ps.type, "
-                   "ps.price_per_hour, ps.location_zone, ps.floor_number "
-                   "FROM ParkingSlot ps "
-                   "JOIN ParkingLot pl ON ps.lot_id = pl.lot_id "
-                   "WHERE ps.status = 'available' AND ps.is_occupied = FALSE "
-                   "ORDER BY pl.lot_name, ps.slot_number";
-
-    if (mysql_query(conn, query.c_str()) != 0)
-    {
-        cout << "Query failed: " << mysql_error(conn) << endl;
-        return;
-    }
-
-    MYSQL_RES *result = mysql_store_result(conn);
-
-    if (!result)
-    {
-        cout << "No slots found!" << endl;
-        return;
-    }
-
-    MYSQL_ROW row;
-    int count = 0;
-
-    cout << "\n";
-    cout << "Slot # | Lot Name       | Type      | Price/hr | Zone  | Floor" << endl;
-    cout << "------+----------------+-----------+----------+-------+-------" << endl;
-
-    while ((row = mysql_fetch_row(result)))
-    {
-        count++;
-        printf("%-6s | %-14s | %-9s | %-8s ETB | %-5s | %-5s\n",
-               row[1], row[2], row[3], row[4], row[5], row[6]);
-    }
-
-    if (count == 0)
-    {
-        cout << "\nNo available slots at the moment." << endl;
-    }
-    else
-    {
-        cout << "\nTotal available: " << count << " slots" << endl;
-    }
-
-    mysql_free_result(result);
+    string q = "SELECT is_vip FROM User WHERE user_id=" + to_string(uid);
+    if (mysql_query(conn, q.c_str()))
+        return false;
+    MYSQL_RES *r = mysql_store_result(conn);
+    if (!r)
+        return false;
+    MYSQL_ROW row = mysql_fetch_row(r);
+    bool vip = row && (atoi(row[0]) == 1);
+    mysql_free_result(r);
+    return vip;
 }
 
-// ============ BOOK PARKING SPOT ============
-
-void bookParkingSpot(MYSQL *conn, int currentUserId)
+void viewAvailableSlots(MYSQL *conn, int uid)
 {
-    clearScreen();
-    cout << "\n==========================================" << endl;
-    cout << "          BOOK PARKING SPOT" << endl;
-    cout << "==========================================" << endl;
-
-    viewAvailableSlots(conn);
-
-    string vehicleQuery = "SELECT vehicle_id, plate_number, vehicle_type FROM Vehicle WHERE user_id = " + to_string(currentUserId);
-
-    if (mysql_query(conn, vehicleQuery.c_str()) != 0)
+    cout << "\nAVAILABLE PARKING SLOTS\n";
+    bool vip = isUserVIP(conn, uid);
+    string q = "SELECT slot_id,slot_number,type,price_per_hour FROM ParkingSlot WHERE status='available' AND is_occupied=FALSE" + (string)(vip ? "" : " AND type!='vip'") + " ORDER BY slot_number";
+    if (mysql_query(conn, q.c_str()))
     {
-        cout << "Query failed: " << mysql_error(conn) << endl;
+        cout << "Error: " << mysql_error(conn) << endl;
         return;
     }
-
-    MYSQL_RES *vehicleResult = mysql_store_result(conn);
-
-    if (!vehicleResult || mysql_num_rows(vehicleResult) == 0)
+    MYSQL_RES *r = mysql_store_result(conn);
+    if (!r)
     {
-        cout << "\nYou have no vehicles registered!" << endl;
-        cout << "Please register a vehicle first." << endl;
+        cout << "No slots found!\n";
+        return;
+    }
+    MYSQL_ROW row;
+    int cnt = 0;
+    cout << "\nID\tSlot #\t\tType\t\tRate(ETB/hr)\n";
+    while ((row = mysql_fetch_row(r)))
+    {
+        cnt++;
+        cout << row[0] << "\t" << row[1] << "\t\t" << row[2] << "\t\t" << atof(row[3]) << "\n";
+    }
+    cout << "\nTotal Available: " << cnt << " slots\n";
+    cout << (vip ? " VIP: Access to ALL slots including premium spots " : " Standard: Upgrade to VIP for premium spots ") << "\n";
+    mysql_free_result(r);
+}
 
-        string plateNumber, vehicleType, brand, color;
-
-        cout << "\n===== REGISTER VEHICLE =====" << endl;
-        cout << "Plate Number: ";
-        cin >> plateNumber;
-        cout << "Vehicle Type (car/motorcycle/truck): ";
-        cin >> vehicleType;
+void bookParkingSpot(MYSQL *conn, int uid)
+{
+    cout << "\n BOOK PARKING SPOT\n";
+    bool vip = isUserVIP(conn, uid);
+    if (!vip)
+        cout << "Note: Standard customers can only book standard slots\n";
+    viewAvailableSlots(conn, uid);
+    string vq = "SELECT vehicle_id,plate_number,vehicle_type FROM Vehicle WHERE user_id=" + to_string(uid);
+    if (mysql_query(conn, vq.c_str()))
+    {
+        cout << "Query failed!\n";
+        return;
+    }
+    MYSQL_RES *vr = mysql_store_result(conn);
+    if (!vr || mysql_num_rows(vr) == 0)
+    {
+        cout << "\n No vehicles registered!\nPlease register a vehicle first.\n";
+        string plate, type, brand, color;
+        cout << "\nREGISTER VEHICLE \nPlate: ";
+        cin >> plate;
+        cout << "Type(car/motorcycle/truck): ";
+        cin >> type;
         cout << "Brand: ";
         cin >> brand;
         cout << "Color: ";
         cin >> color;
-
-        string insertVehicle = "INSERT INTO Vehicle (plate_number, user_id, vehicle_type, brand, color) VALUES ('";
-        insertVehicle += plateNumber + "', " + to_string(currentUserId) + ", '" + vehicleType + "', '" + brand + "', '" + color + "')";
-
-        if (mysql_query(conn, insertVehicle.c_str()) == 0)
+        string ins = "INSERT INTO Vehicle(plate_number,user_id,vehicle_type,brand,color) VALUES('" + plate + "'," + to_string(uid) + ",'" + type + "','" + brand + "','" + color + "')";
+        if (mysql_query(conn, ins.c_str()))
         {
-            cout << "Vehicle registered successfully!" << endl;
-        }
-        else
-        {
-            cout << "Failed to register vehicle: " << mysql_error(conn) << endl;
-            if (vehicleResult) mysql_free_result(vehicleResult);
+            cout << "Registration failed!\n";
+            if (vr)
+                mysql_free_result(vr);
             return;
         }
-
-        if (mysql_query(conn, vehicleQuery.c_str()) != 0)
+        cout << " Vehicle registered!\n";
+        if (mysql_query(conn, vq.c_str()))
         {
-            cout << "Query failed!" << endl;
+            cout << "Query failed!\n";
             return;
         }
-        if (vehicleResult) mysql_free_result(vehicleResult);
-        vehicleResult = mysql_store_result(conn);
+        if (vr)
+            mysql_free_result(vr);
+        vr = mysql_store_result(conn);
     }
-
-    cout << "\n===== YOUR VEHICLES =====" << endl;
-    MYSQL_ROW vRow;
-    while ((vRow = mysql_fetch_row(vehicleResult)))
-    {
-        cout << "ID: " << vRow[0] << " | " << vRow[1] << " | " << vRow[2] << endl;
-    }
-
-    mysql_data_seek(vehicleResult, 0);
-
-    int slotId, vehicleId;
-
-    cout << "\nEnter Slot Number from list above: ";
-    cin >> slotId;
+    cout << "\nYOUR VEHICLES\n";
+    MYSQL_ROW vrow;
+    while ((vrow = mysql_fetch_row(vr)))
+        cout << "ID:" << vrow[0] << " | " << vrow[1] << " | " << vrow[2] << endl;
+    mysql_data_seek(vr, 0);
+    int sid, vid;
+    cout << "\nEnter Slot ID: ";
+    cin >> sid;
     cout << "Enter Vehicle ID: ";
-    cin >> vehicleId;
-
-    string priceQuery = "SELECT price_per_hour, lot_id FROM ParkingSlot WHERE slot_id = " + to_string(slotId);
-    float pricePerHour = 50;
-
-    if (mysql_query(conn, priceQuery.c_str()) == 0)
+    cin >> vid;
+    string stq = "SELECT type FROM ParkingSlot WHERE slot_id=" + to_string(sid);
+    string stype = "standard";
+    if (!mysql_query(conn, stq.c_str()))
     {
-        MYSQL_RES *priceResult = mysql_store_result(conn);
-        if (priceResult)
+        MYSQL_RES *tr = mysql_store_result(conn);
+        if (tr)
         {
-            MYSQL_ROW priceRow = mysql_fetch_row(priceResult);
-            if (priceRow)
-            {
-                pricePerHour = atof(priceRow[0]);
-            }
-            mysql_free_result(priceResult);
+            MYSQL_ROW trow = mysql_fetch_row(tr);
+            if (trow)
+                stype = trow[0];
+            mysql_free_result(tr);
         }
     }
-
-    string bookQuery = "INSERT INTO Booking (user_id, slot_id, vehicle_id, start_time, booking_status, payment_status) VALUES (";
-    bookQuery += to_string(currentUserId) + ", " + to_string(slotId) + ", " + to_string(vehicleId) + ", NOW(), 'active', 'pending')";
-
-    if (mysql_query(conn, bookQuery.c_str()) == 0)
+    if (stype == "vip" && !vip)
     {
-        cout << "\nParking spot booked successfully!" << endl;
-        cout << "Price: " << pricePerHour << " ETB per hour" << endl;
-
-        string updateSlot = "UPDATE ParkingSlot SET is_occupied = TRUE, status = 'occupied' WHERE slot_id = " + to_string(slotId);
-        mysql_query(conn, updateSlot.c_str());
+        cout << "\n ERROR: VIP slots only for VIP members!\n";
+        mysql_free_result(vr);
+        return;
+    }
+    string pq = "SELECT price_per_hour FROM ParkingSlot WHERE slot_id=" + to_string(sid);
+    float rate = 50;
+    if (!mysql_query(conn, pq.c_str()))
+    {
+        MYSQL_RES *pr = mysql_store_result(conn);
+        if (pr)
+        {
+            MYSQL_ROW prow = mysql_fetch_row(pr);
+            if (prow)
+                rate = atof(prow[0]);
+            mysql_free_result(pr);
+        }
+    }
+    string bq = "INSERT INTO Booking(user_id,slot_id,vehicle_id,start_time,booking_status,payment_status) VALUES(" + to_string(uid) + "," + to_string(sid) + "," + to_string(vid) + ",NOW(),'active','pending')";
+    if (!mysql_query(conn, bq.c_str()))
+    {
+        cout << "\n Parking spot booked!\n Rate: " << rate << " ETB/hour\n";
+        mysql_query(conn, ("UPDATE ParkingSlot SET is_occupied=TRUE,status='occupied' WHERE slot_id=" + to_string(sid)).c_str());
     }
     else
-    {
-        cout << "\nBooking failed: " << mysql_error(conn) << endl;
-    }
-
-    mysql_free_result(vehicleResult);
+        cout << "\n Booking failed: " << mysql_error(conn) << endl;
+    mysql_free_result(vr);
 }
 
-// ============ VIEW MY BOOKINGS ============
-
-void viewMyBookings(MYSQL *conn, int currentUserId)
+void checkOutParking(MYSQL *conn, int uid)
 {
-    clearScreen();
-    cout << "\n==========================================" << endl;
-    cout << "           MY BOOKINGS" << endl;
-    cout << "==========================================" << endl;
-
-    string query = "SELECT b.booking_id, ps.slot_number, pl.lot_name, b.start_time, "
-                   "b.end_time, b.total_fee, b.booking_status, b.payment_status, b.slot_id "
-                   "FROM Booking b "
-                   "JOIN ParkingSlot ps ON b.slot_id = ps.slot_id "
-                   "JOIN ParkingLot pl ON ps.lot_id = pl.lot_id "
-                   "WHERE b.user_id = " + to_string(currentUserId) +
-                   " ORDER BY b.created_at DESC";
-
-    if (mysql_query(conn, query.c_str()) != 0)
-    {
-        cout << "Query failed: " << mysql_error(conn) << endl;
-        return;
-    }
-
-    MYSQL_RES *result = mysql_store_result(conn);
-
-    if (!result)
-    {
-        cout << "No bookings found!" << endl;
-        return;
-    }
-
-    MYSQL_ROW row;
-    int count = 0;
-
-    cout << "\n";
-    while ((row = mysql_fetch_row(result)))
-    {
-        count++;
-        cout << "Booking #" << row[0] << " | Slot: " << row[1] << " (" << row[2] << ")" << endl;
-        cout << "  Start: " << row[3] << endl;
-        cout << "  End: " << (row[4] ? row[4] : "Still parked") << endl;
-        cout << "  Fee: " << (row[5] ? string(row[5]) + " ETB" : "Pending") << endl;
-        cout << "  Booking: " << row[6] << " | Payment: " << row[7] << endl;
-        cout << "  -----------------------------" << endl;
-    }
-
-    if (count == 0)
-    {
-        cout << "\nYou have no bookings yet." << endl;
-    }
-
-    mysql_free_result(result);
-}
-
-// ============ CHECK OUT ============
-
-void checkOutParking(MYSQL *conn, int currentUserId)
-{
-    clearScreen();
-    cout << "\n==========================================" << endl;
-    cout << "           CHECK OUT" << endl;
-    cout << "==========================================" << endl;
-
-    string query = "SELECT b.booking_id, ps.slot_number, pl.lot_name, b.start_time, ps.price_per_hour, b.slot_id "
-                   "FROM Booking b "
-                   "JOIN ParkingSlot ps ON b.slot_id = ps.slot_id "
-                   "JOIN ParkingLot pl ON ps.lot_id = pl.lot_id "
-                   "WHERE b.user_id = " + to_string(currentUserId) +
-                   " AND b.booking_status = 'active'";
-
-    if (mysql_query(conn, query.c_str()) != 0)
-    {
-        cout << "Query failed: " << mysql_error(conn) << endl;
-        return;
-    }
-
-    MYSQL_RES *result = mysql_store_result(conn);
-
-    if (!result || mysql_num_rows(result) == 0)
-    {
-        cout << "\nYou have no active bookings to check out." << endl;
-        if (result) mysql_free_result(result);
-        return;
-    }
-
-    cout << "\nYour Active Bookings:" << endl;
-    MYSQL_ROW row;
-    while ((row = mysql_fetch_row(result)))
-    {
-        cout << "Booking #" << row[0] << " | Slot: " << row[1] << " | Lot: " << row[2]
-             << " | Started: " << row[3] << " | Rate: " << row[4] << " ETB/hr" << endl;
-    }
-
-    int bookingId;
-    cout << "\nEnter Booking ID to check out: ";
-    cin >> bookingId;
-
-    string detailQuery = "SELECT start_time, price_per_hour, b.slot_id "
-                         "FROM Booking b "
-                         "JOIN ParkingSlot ps ON b.slot_id = ps.slot_id "
-                         "WHERE b.booking_id = " + to_string(bookingId) +
-                         " AND b.user_id = " + to_string(currentUserId);
-
-    if (mysql_query(conn, detailQuery.c_str()) != 0)
+    cout << "\nCHECK OUT & BILLING\n";
+    string q = "SELECT b.booking_id,ps.slot_number,b.start_time,ps.price_per_hour,b.slot_id FROM Booking b JOIN ParkingSlot ps ON b.slot_id=ps.slot_id WHERE b.user_id=" + to_string(uid) + " AND b.booking_status='active'";
+    if (mysql_query(conn, q.c_str()))
     {
         cout << "Error: " << mysql_error(conn) << endl;
-        mysql_free_result(result);
         return;
     }
-
-    MYSQL_RES *detailResult = mysql_store_result(conn);
-    if (!detailResult || mysql_num_rows(detailResult) == 0)
+    MYSQL_RES *r = mysql_store_result(conn);
+    if (!r || mysql_num_rows(r) == 0)
     {
-        cout << "Booking not found!" << endl;
-        if (detailResult) mysql_free_result(detailResult);
-        mysql_free_result(result);
+        cout << "\nNo active bookings\n";
+        if (r)
+            mysql_free_result(r);
+        return;
+    }
+    cout << "\nActive Bookings:\n";
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(r)))
+        cout << "Booking #" << row[0] << " | Slot:" << row[1] << " | Started:" << row[2] << " | Rate:" << row[3] << " ETB/hr\n";
+
+    int bid;
+    cout << "\nEnter Booking ID: ";
+    cin >> bid;
+
+    string dq = "SELECT start_time,price_per_hour,b.slot_id FROM Booking b JOIN ParkingSlot ps ON b.slot_id=ps.slot_id WHERE b.booking_id=" + to_string(bid) + " AND b.user_id=" + to_string(uid);
+    if (mysql_query(conn, dq.c_str()))
+    {
+        cout << "Error!\n";
+        mysql_free_result(r);
+        return;
+    }
+    MYSQL_RES *dr = mysql_store_result(conn);
+    if (!dr || mysql_num_rows(dr) == 0)
+    {
+        cout << "Booking not found!\n";
+        if (dr)
+            mysql_free_result(dr);
+        mysql_free_result(r);
         return;
     }
 
-    MYSQL_ROW detailRow = mysql_fetch_row(detailResult);
-    float pricePerHour = atof(detailRow[1]);
-    int slotId = atoi(detailRow[2]);
+    MYSQL_ROW drow = mysql_fetch_row(dr);
+    string startTimeStr = drow[0];
+    float rate = atof(drow[1]);
+    int sid = atoi(drow[2]);
 
-    float hours;
-    cout << "Enter hours parked: ";
-    cin >> hours;
+    time_t now = time(nullptr);
+    struct tm startTm = {0};
+    int year, month, day, hour, minute, second;
+    sscanf(startTimeStr.c_str(), "%d-%d-%d %d:%d:%d", &year, &month, &day, &hour, &minute, &second);
+    startTm.tm_year = year - 1900;
+    startTm.tm_mon = month - 1;
+    startTm.tm_mday = day;
+    startTm.tm_hour = hour;
+    startTm.tm_min = minute;
+    startTm.tm_sec = second;
+    time_t startTime = mktime(&startTm);
 
-    float totalFee = hours * pricePerHour;
+    double secondsParked = difftime(now, startTime);
+    float hoursParked = (secondsParked > 0) ? (secondsParked / 3600.0) : 0;
+    float billableHours = ceil(hoursParked * 100) / 100;
+    if (billableHours < 0.5 && secondsParked > 0)
+        billableHours = 0.5;
+    float total = billableHours * rate;
 
-    cout << "\n===== PAYMENT =====" << endl;
-    cout << "Hours parked: " << hours << endl;
-    cout << "Rate: " << pricePerHour << " ETB/hour" << endl;
-    cout << "Total Fee: " << totalFee << " ETB" << endl;
+    cout << "\nINVOICE\n";
+    cout << "Start Time: " << startTimeStr << "\n";
+    cout << "Duration: " << hoursParked << " hours\n";
+    cout << "Billable: " << billableHours << " hours @ " << rate << " ETB/hr\n";
+    cout << "Total Due: " << total << " ETB\n";
 
-    string paymentMethod;
+    string method;
     cout << "\nPayment Method (cash/credit_card/telebirr): ";
-    cin >> paymentMethod;
+    cin >> method;
 
-    string updateBooking = "UPDATE Booking SET end_time = NOW(), duration = " + to_string(hours) +
-                           ", total_fee = " + to_string(totalFee) +
-                           ", payment_status = 'paid', booking_status = 'completed' " +
-                           "WHERE booking_id = " + to_string(bookingId);
-
-    if (mysql_query(conn, updateBooking.c_str()) == 0)
+    string ub = "UPDATE Booking SET end_time=NOW(),duration=" + to_string(billableHours) + ",total_fee=" + to_string(total) + ",payment_status='paid',booking_status='completed' WHERE booking_id=" + to_string(bid);
+    if (!mysql_query(conn, ub.c_str()))
     {
-        string paymentQuery = "INSERT INTO Payment (booking_id, amount, payment_method, payment_status) VALUES (";
-        paymentQuery += to_string(bookingId) + ", " + to_string(totalFee) + ", '" + paymentMethod + "', 'completed')";
-        mysql_query(conn, paymentQuery.c_str());
-
-        string freeSlot = "UPDATE ParkingSlot SET is_occupied = FALSE, status = 'available' WHERE slot_id = " + to_string(slotId);
-        mysql_query(conn, freeSlot.c_str());
-
-        cout << "\nCheck out successful!" << endl;
-        cout << "Thank you for parking with us!" << endl;
+        mysql_query(conn, ("INSERT INTO Payment(booking_id,amount,payment_method,payment_status) VALUES(" + to_string(bid) + "," + to_string(total) + ",'" + method + "','completed')").c_str());
+        mysql_query(conn, ("UPDATE ParkingSlot SET is_occupied=FALSE,status='available' WHERE slot_id=" + to_string(sid)).c_str());
+        cout << "\nCheckout successful! Invoice generated.\n";
     }
     else
-    {
-        cout << "\nCheck out failed: " << mysql_error(conn) << endl;
-    }
+        cout << "\nCheckout failed: " << mysql_error(conn) << endl;
 
-    mysql_free_result(detailResult);
-    mysql_free_result(result);
+    mysql_free_result(dr);
+    mysql_free_result(r);
+}
+void viewMyBookings(MYSQL *conn, int uid)
+{
+    cout << "\nMY BOOKINGS\n";
+    string q = "SELECT b.booking_id,ps.slot_number,b.start_time,b.end_time,b.total_fee,b.booking_status,b.payment_status FROM Booking b JOIN ParkingSlot ps ON b.slot_id=ps.slot_id WHERE b.user_id=" + to_string(uid) + " ORDER BY b.created_at DESC";
+    if (mysql_query(conn, q.c_str()))
+    {
+        cout << "Error: " << mysql_error(conn) << endl;
+        return;
+    }
+    MYSQL_RES *r = mysql_store_result(conn);
+    if (!r)
+    {
+        cout << "No bookings\n";
+        return;
+    }
+    MYSQL_ROW row;
+    int cnt = 0;
+    while ((row = mysql_fetch_row(r)))
+    {
+        cnt++;
+        cout << "\nBooking #" << row[0] << "\n   Slot: " << row[1] << "\n   Start: " << row[2] << "\n   End: " << (row[3] ? row[3] : "Still Active") << "\n   Fee: " << (row[4] ? string(row[4]) + " ETB" : "Pending") << "\n   Status: " << row[5] << " | Payment: " << row[6] << endl;
+    }
+    if (cnt == 0)
+        cout << "\nNo bookings yet\n";
+    mysql_free_result(r);
 }
 
-// ============ VIEW MY PROFILE ============
-
-void viewMyProfile(MYSQL *conn, int currentUserId)
+void viewMyProfile(MYSQL *conn, int uid)
 {
-    clearScreen();
-    cout << "\n==========================================" << endl;
-    cout << "            MY PROFILE" << endl;
-    cout << "==========================================" << endl;
-
-    string query = "SELECT full_name, email, phone_number, role, is_vip, created_at, status FROM User WHERE user_id = " + to_string(currentUserId);
-
-    if (mysql_query(conn, query.c_str()) != 0)
+    cout << "\nMY PROFILE\n";
+    string q = "SELECT full_name,email,phone_number,is_vip,created_at,status FROM User WHERE user_id=" + to_string(uid);
+    if (mysql_query(conn, q.c_str()))
     {
-        cout << "Query failed: " << mysql_error(conn) << endl;
+        cout << "Error!\n";
         return;
     }
-
-    MYSQL_RES *result = mysql_store_result(conn);
-
-    if (!result)
+    MYSQL_RES *r = mysql_store_result(conn);
+    if (!r)
     {
-        cout << "Profile not found!" << endl;
+        cout << "Profile not found\n";
         return;
     }
-
-    MYSQL_ROW row = mysql_fetch_row(result);
-
+    MYSQL_ROW row = mysql_fetch_row(r);
     if (row)
     {
-        cout << "\n  Name: " << row[0] << endl;
-        cout << "  Email: " << row[1] << endl;
-        cout << "  Phone: " << row[2] << endl;
-        cout << "  Role: " << row[3] << endl;
-        cout << "  VIP: " << (atoi(row[4]) == 1 ? "Yes" : "No") << endl;
-        cout << "  Member Since: " << row[5] << endl;
-        cout << "  Status: " << row[6] << endl;
+        cout << "\nName: " << row[0] << "\nEmail: " << row[1] << "\nPhone: " << row[2];
+        cout << "\nVIP: " << (atoi(row[3]) == 1 ? "Yes (Premium)" : "No (Standard)");
+        cout << "\nMember Since: " << row[4] << "\nStatus: " << row[5] << endl;
     }
-
-    mysql_free_result(result);
-
-    cout << "\n===== YOUR VEHICLES =====" << endl;
-    string vehicleQuery = "SELECT vehicle_id, plate_number, vehicle_type, brand, color FROM Vehicle WHERE user_id = " + to_string(currentUserId);
-
-    if (mysql_query(conn, vehicleQuery.c_str()) == 0)
+    mysql_free_result(r);
+    cout << "\nREGISTERED VEHICLES\n";
+    string vq = "SELECT vehicle_id,plate_number,vehicle_type,brand,color FROM Vehicle WHERE user_id=" + to_string(uid);
+    if (!mysql_query(conn, vq.c_str()))
     {
-        MYSQL_RES *vResult = mysql_store_result(conn);
-        if (vResult && mysql_num_rows(vResult) > 0)
+        MYSQL_RES *vr = mysql_store_result(conn);
+        if (vr && mysql_num_rows(vr) > 0)
         {
-            MYSQL_ROW vRow;
-            while ((vRow = mysql_fetch_row(vResult)))
-            {
-                cout << "  ID:" << vRow[0] << " | " << vRow[1] << " | " << vRow[2] << " | " << vRow[3] << " | " << vRow[4] << endl;
-            }
+            MYSQL_ROW vrow;
+            while ((vrow = mysql_fetch_row(vr)))
+                cout << "ID:" << vrow[0] << " | " << vrow[1] << " | " << vrow[2] << " | " << vrow[3] << " | " << vrow[4] << endl;
         }
         else
-        {
-            cout << "  No vehicles registered." << endl;
-        }
-        if (vResult) mysql_free_result(vResult);
+            cout << "   No vehicles registered\n";
+        if (vr)
+            mysql_free_result(vr);
     }
 }
 
-// ============ MAKE RESERVATION ============
-
-void makeReservation(MYSQL *conn, int currentUserId)
+void updatePassword(MYSQL *conn, int uid)
 {
-    clearScreen();
-    cout << "\n==========================================" << endl;
-    cout << "        MAKE RESERVATION" << endl;
-    cout << "==========================================" << endl;
-
-    viewAvailableSlots(conn);
-
-    string vehicleQuery = "SELECT vehicle_id, plate_number, vehicle_type FROM Vehicle WHERE user_id = " + to_string(currentUserId);
-
-    if (mysql_query(conn, vehicleQuery.c_str()) != 0)
-    {
-        cout << "Error loading vehicles!" << endl;
-        return;
-    }
-
-    MYSQL_RES *vehicleResult = mysql_store_result(conn);
-
-    if (!vehicleResult || mysql_num_rows(vehicleResult) == 0)
-    {
-        cout << "\nYou need to register a vehicle first (use Book Parking Spot option)!" << endl;
-        if (vehicleResult) mysql_free_result(vehicleResult);
-        return;
-    }
-
-    cout << "\n===== YOUR VEHICLES =====" << endl;
-    MYSQL_ROW vRow;
-    while ((vRow = mysql_fetch_row(vehicleResult)))
-    {
-        cout << "ID: " << vRow[0] << " | " << vRow[1] << " | " << vRow[2] << endl;
-    }
-
-    int slotId, vehicleId;
-    string expiryDate, expiryTime;
-
-    cout << "\nEnter Slot ID: ";
-    cin >> slotId;
-    cout << "Enter Vehicle ID: ";
-    cin >> vehicleId;
-    cout << "Reservation Expiry Date (YYYY-MM-DD): ";
-    cin >> expiryDate;
-    cout << "Reservation Expiry Time (HH:MM:SS): ";
-    cin >> expiryTime;
-
-    string expiryDatetime = expiryDate + " " + expiryTime;
-
-    string reserveQuery = "INSERT INTO Reservation (user_id, slot_id, vehicle_id, expiry_time, status) VALUES (";
-    reserveQuery += to_string(currentUserId) + ", " + to_string(slotId) + ", " + to_string(vehicleId) + ", '" + expiryDatetime + "', 'active')";
-
-    if (mysql_query(conn, reserveQuery.c_str()) == 0)
-    {
-        cout << "\nReservation made successfully!" << endl;
-        cout << "Your slot is reserved until: " << expiryDatetime << endl;
-
-        string updateSlot = "UPDATE ParkingSlot SET status = 'reserved' WHERE slot_id = " + to_string(slotId);
-        mysql_query(conn, updateSlot.c_str());
-    }
-    else
-    {
-        cout << "\nReservation failed: " << mysql_error(conn) << endl;
-    }
-
-    mysql_free_result(vehicleResult);
-}
-
-// ============ VIEW MY RESERVATIONS ============
-
-void viewMyReservations(MYSQL *conn, int currentUserId)
-{
-    clearScreen();
-    cout << "\n==========================================" << endl;
-    cout << "         MY RESERVATIONS" << endl;
-    cout << "==========================================" << endl;
-
-    string query = "SELECT r.reservation_id, ps.slot_number, pl.lot_name, v.plate_number, "
-                   "r.reservation_time, r.expiry_time, r.status "
-                   "FROM Reservation r "
-                   "JOIN ParkingSlot ps ON r.slot_id = ps.slot_id "
-                   "JOIN ParkingLot pl ON ps.lot_id = pl.lot_id "
-                   "JOIN Vehicle v ON r.vehicle_id = v.vehicle_id "
-                   "WHERE r.user_id = " + to_string(currentUserId) +
-                   " ORDER BY r.reservation_time DESC";
-
-    if (mysql_query(conn, query.c_str()) != 0)
-    {
-        cout << "Query failed: " << mysql_error(conn) << endl;
-        return;
-    }
-
-    MYSQL_RES *result = mysql_store_result(conn);
-
-    if (!result || mysql_num_rows(result) == 0)
-    {
-        cout << "\nNo reservations found." << endl;
-        if (result) mysql_free_result(result);
-        return;
-    }
-
-    MYSQL_ROW row;
-    cout << "\n";
-    while ((row = mysql_fetch_row(result)))
-    {
-        cout << "Reservation #" << row[0] << endl;
-        cout << "  Slot: " << row[1] << " (" << row[2] << ")" << endl;
-        cout << "  Vehicle: " << row[3] << endl;
-        cout << "  Made: " << row[4] << endl;
-        cout << "  Expires: " << row[5] << endl;
-        cout << "  Status: " << row[6] << endl;
-        cout << "  -----------------------------" << endl;
-    }
-
-    mysql_free_result(result);
-}
-
-// ============ UPDATE PASSWORD ============
-
-void updatePassword(MYSQL *conn, int currentUserId)
-{
-    clearScreen();
-    cout << "\n==========================================" << endl;
-    cout << "          UPDATE PASSWORD" << endl;
-    cout << "==========================================" << endl;
-
-    string oldPassword, newPassword, confirmPassword;
-
-    cout << "\nCurrent Password: ";
-    cin >> oldPassword;
+    cout << "\nUPDATE PASSWORD\n";
+    string oldp, newp, conf;
+    cout << "Current Password: ";
+    cin >> oldp;
     cout << "New Password: ";
-    cin >> newPassword;
-    cout << "Confirm New Password: ";
-    cin >> confirmPassword;
-
-    if (newPassword != confirmPassword)
+    cin >> newp;
+    cout << "Confirm: ";
+    cin >> conf;
+    if (newp != conf)
     {
-        cout << "\nPasswords don't match!" << endl;
+        cout << "\n Passwords don't match!\n";
         return;
     }
-
-    string checkQuery = "SELECT user_id FROM User WHERE user_id = " + to_string(currentUserId) + " AND password_hash = '" + oldPassword + "'";
-
-    if (mysql_query(conn, checkQuery.c_str()) != 0)
+    string hashedOld = hashPassword(oldp);
+    string cq = "SELECT user_id FROM User WHERE user_id=" + to_string(uid) + " AND password_hash='" + hashedOld + "'";
+    if (mysql_query(conn, cq.c_str()))
     {
-        cout << "Error!" << endl;
+        cout << "Error!\n";
         return;
     }
-
-    MYSQL_RES *result = mysql_store_result(conn);
-
-    if (!result || mysql_num_rows(result) == 0)
+    MYSQL_RES *r = mysql_store_result(conn);
+    if (!r || mysql_num_rows(r) == 0)
     {
-        cout << "\nCurrent password is incorrect!" << endl;
-        if (result) mysql_free_result(result);
+        cout << "\ncurrent password incorrect\n";
+        if (r)
+            mysql_free_result(r);
         return;
     }
-    mysql_free_result(result);
-
-    string updateQuery = "UPDATE User SET password_hash = '" + newPassword + "' WHERE user_id = " + to_string(currentUserId);
-
-    if (mysql_query(conn, updateQuery.c_str()) == 0)
-    {
-        cout << "\nPassword updated successfully!" << endl;
-    }
-    else
-    {
-        cout << "\nUpdate failed!" << endl;
-    }
+    mysql_free_result(r);
+    string hashedNew = hashPassword(newp);
+    string uq = "UPDATE User SET password_hash='" + hashedNew + "' WHERE user_id=" + to_string(uid);
+    cout << (!mysql_query(conn, uq.c_str()) ? "\nPassword updated!\n" : "\n Update failed!\n");
 }
 
-// ============ VIEW PAYMENT HISTORY ============
-
-void viewPaymentHistory(MYSQL *conn, int currentUserId)
+void customerDashboard(MYSQL *conn, string &user, int &uid, bool &loggedIn)
 {
-    clearScreen();
-    cout << "\n==========================================" << endl;
-    cout << "         PAYMENT HISTORY" << endl;
-    cout << "==========================================" << endl;
-
-    string query = "SELECT p.payment_id, p.amount, p.payment_method, p.payment_date, p.payment_status, "
-                   "b.booking_id, ps.slot_number "
-                   "FROM Payment p "
-                   "JOIN Booking b ON p.booking_id = b.booking_id "
-                   "JOIN ParkingSlot ps ON b.slot_id = ps.slot_id "
-                   "WHERE b.user_id = " + to_string(currentUserId) +
-                   " ORDER BY p.payment_date DESC";
-
-    if (mysql_query(conn, query.c_str()) != 0)
+    int ch;
+    bool back = false;
+    while (!back)
     {
-        cout << "Query failed: " << mysql_error(conn) << endl;
-        return;
-    }
+        cout << "\nCUSTOMER DASHBOARD\n";
+        bool vip = isUserVIP(conn, uid);
+        cout << "Welcome, " << user << (vip ? " (VIP)" : " (Standard)") << "\n";
+        cout << "1. View Available Slots\n";
+        cout << "2. Book Parking Spot\n";
+        cout << "3. Check Out & Get Invoice\n";
+        cout << "4. View My Bookings\n";
+        cout << "5. My Profile\n";
+        cout << "6. Update Password\n";
+        cout << "7. Logout\n";
 
-    MYSQL_RES *result = mysql_store_result(conn);
-
-    if (!result || mysql_num_rows(result) == 0)
-    {
-        cout << "\nNo payment history." << endl;
-        if (result) mysql_free_result(result);
-        return;
-    }
-
-    MYSQL_ROW row;
-    float totalSpent = 0;
-
-    cout << "\n";
-    while ((row = mysql_fetch_row(result)))
-    {
-        float amount = atof(row[1]);
-        totalSpent += amount;
-
-        cout << "Payment #" << row[0] << " | Booking #" << row[5] << endl;
-        cout << "  Amount: " << row[1] << " ETB" << endl;
-        cout << "  Method: " << row[2] << endl;
-        cout << "  Date: " << row[3] << endl;
-        cout << "  Status: " << row[4] << " | Slot: " << row[6] << endl;
-        cout << "  -----------------------------" << endl;
-    }
-
-    cout << "\nTotal Spent: " << totalSpent << " ETB" << endl;
-
-    mysql_free_result(result);
-}
-
-// ============ SEARCH SLOTS ============
-
-void searchSlots(MYSQL *conn)
-{
-    clearScreen();
-    cout << "\n==========================================" << endl;
-    cout << "          SEARCH PARKING SLOTS" << endl;
-    cout << "==========================================" << endl;
-
-    cout << "\nFilter by:" << endl;
-    cout << "  1. By Type (standard/vip/handicap/etc)" << endl;
-    cout << "  2. By Price Range" << endl;
-    cout << "  3. By Location/Zone" << endl;
-    cout << "\n  Enter choice: ";
-
-    int choice;
-    cin >> choice;
-
-    string query = "SELECT ps.slot_id, ps.slot_number, pl.lot_name, ps.type, "
-                   "ps.price_per_hour, ps.location_zone, ps.floor_number "
-                   "FROM ParkingSlot ps "
-                   "JOIN ParkingLot pl ON ps.lot_id = pl.lot_id "
-                   "WHERE ps.status = 'available' AND ps.is_occupied = FALSE ";
-
-    if (choice == 1)
-    {
-        string type;
-        cout << "Enter type: ";
-        cin >> type;
-        query += "AND ps.type = '" + type + "' ";
-    }
-    else if (choice == 2)
-    {
-        float minPrice, maxPrice;
-        cout << "Min price (ETB): ";
-        cin >> minPrice;
-        cout << "Max price (ETB): ";
-        cin >> maxPrice;
-        query += "AND ps.price_per_hour BETWEEN " + to_string(minPrice) + " AND " + to_string(maxPrice) + " ";
-    }
-    else if (choice == 3)
-    {
-        string zone;
-        cout << "Enter zone: ";
-        cin >> zone;
-        query += "AND ps.location_zone = '" + zone + "' ";
-    }
-
-    query += "ORDER BY pl.lot_name, ps.slot_number";
-
-    if (mysql_query(conn, query.c_str()) != 0)
-    {
-        cout << "Query failed: " << mysql_error(conn) << endl;
-        return;
-    }
-
-    MYSQL_RES *result = mysql_store_result(conn);
-
-    if (!result || mysql_num_rows(result) == 0)
-    {
-        cout << "\nNo slots found matching your criteria." << endl;
-        if (result) mysql_free_result(result);
-        return;
-    }
-
-    MYSQL_ROW row;
-    int count = 0;
-
-    cout << "\n";
-    cout << "Slot # | Lot Name       | Type      | Price/hr | Zone  | Floor" << endl;
-    cout << "------+----------------+-----------+----------+-------+-------" << endl;
-
-    while ((row = mysql_fetch_row(result)))
-    {
-        count++;
-        printf("%-6s | %-14s | %-9s | %-8s ETB | %-5s | %-5s\n",
-               row[1], row[2], row[3], row[4], row[5], row[6]);
-    }
-
-    cout << "\nFound: " << count << " matching slots" << endl;
-
-    mysql_free_result(result);
-}
-
-// ============ CUSTOMER DASHBOARD ============
-
-void customerDashboard(MYSQL *conn, string &currentUser, string &currentRole,
-                       int &currentUserId, bool &isLoggedIn)
-{
-    int choice;
-    bool goBack = false;
-
-    while (!goBack)
-    {
-        clearScreen();
-
-        string vipQuery = "SELECT is_vip FROM User WHERE user_id = " + to_string(currentUserId);
-        bool isVIP = false;
-        if (mysql_query(conn, vipQuery.c_str()) == 0)
+        cout << "Choice: ";
+        cin >> ch;
+        if (ch == 1)
+            viewAvailableSlots(conn, uid);
+        else if (ch == 2)
+            bookParkingSpot(conn, uid);
+        else if (ch == 3)
+            checkOutParking(conn, uid);
+        else if (ch == 4)
+            viewMyBookings(conn, uid);
+        else if (ch == 5)
+            viewMyProfile(conn, uid);
+        else if (ch == 6)
+            updatePassword(conn, uid);
+        else if (ch == 7)
         {
-            MYSQL_RES *vipResult = mysql_store_result(conn);
-            if (vipResult)
-            {
-                MYSQL_ROW vipRow = mysql_fetch_row(vipResult);
-                if (vipRow && atoi(vipRow[0]) == 1)
-                {
-                    isVIP = true;
-                }
-                mysql_free_result(vipResult);
-            }
+            logoutUser(user, uid, loggedIn);
+            back = true;
         }
-
-        cout << "\n";
-        cout << "==========================================" << endl;
-        cout << "         CUSTOMER DASHBOARD" << endl;
-        cout << "==========================================" << endl;
-        cout << "\n";
-        cout << "  Welcome, " << currentUser;
-        if (isVIP) cout << " VIP";
-        cout << "!" << endl;
-        cout << "\n";
-        cout << "  --- PARKING ---" << endl;
-        cout << "  1. View Available Slots" << endl;
-        cout << "  2. Search/Filter Slots" << endl;
-        cout << "  3. Book Parking Spot" << endl;
-        cout << "  4. Check Out (Exit Parking)" << endl;
-        cout << "\n";
-        cout << "  --- RESERVATIONS ---" << endl;
-        cout << "  5. Make Reservation" << endl;
-        cout << "  6. View My Reservations" << endl;
-        cout << "\n";
-        cout << "  --- HISTORY ---" << endl;
-        cout << "  7. View My Bookings" << endl;
-        cout << "  8. Payment History" << endl;
-        cout << "\n";
-        cout << "  --- ACCOUNT ---" << endl;
-        cout << "  9. My Profile" << endl;
-        cout << "  10. Update Password" << endl;
-        cout << "  11. Logout" << endl;
-        cout << "\n";
-        cout << "  Enter choice: ";
-
-        cin >> choice;
-
-        if (choice == 1) viewAvailableSlots(conn);
-        else if (choice == 2) searchSlots(conn);
-        else if (choice == 3) bookParkingSpot(conn, currentUserId);
-        else if (choice == 4) checkOutParking(conn, currentUserId);
-        else if (choice == 5) makeReservation(conn, currentUserId);
-        else if (choice == 6) viewMyReservations(conn, currentUserId);
-        else if (choice == 7) viewMyBookings(conn, currentUserId);
-        else if (choice == 8) viewPaymentHistory(conn, currentUserId);
-        else if (choice == 9) viewMyProfile(conn, currentUserId);
-        else if (choice == 10) updatePassword(conn, currentUserId);
-        else if (choice == 11)
+        else
+            cout << "\nInvalid choice!\n";
+        if (!back && ch >= 1 && ch <= 6)
         {
-            logoutUser(currentUser, currentRole, currentUserId, isLoggedIn);
-            goBack = true;
-        }
-        else cout << "\nInvalid choice!" << endl;
-
-        if (!goBack)
-        {
-            cout << "\nPress Enter to continue...";
+            cout << "\nPress Enter";
             cin.ignore();
             cin.get();
         }
