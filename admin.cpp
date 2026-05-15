@@ -214,16 +214,13 @@ void adminDashboard(MYSQL *conn, string &adminUser, int &adminId, bool &loggedIn
     while (!back)
     {
         cout << "\nADMIN DASHBOARD\n";
-        cout << "Welcome, Administrator: " << adminUser << "\n\n";
+        cout << "Welcome, Administrator: " << adminUser << "\n";
         cout << "SLOT LIFECYCLE MANAGEMENT\n";
         cout << "1. Add Parking Slot\n";
         cout << "2. Modify Parking Slot\n";
-        cout << "3. Remove Parking Slot\n\n";
-        cout << "DYNAMIC FINANCIAL CONFIGURATION\n";
-        cout << "4. Configure Rates\n\n";
-        cout << "INVENTORY CATEGORIZATION\n";
-        cout << "5. View All Slots (Normal/VIP)\n\n";
-        cout << "COMPREHENSIVE MONITORING\n";
+        cout << "3. Remove Parking Slot\n";
+        cout << "4. Configure Rates\n";
+        cout << "5. View All Slots (Normal/VIP)\n";
         cout << "6.Logout\n";
         cout << "Enter choice: ";
         cin >> ch;

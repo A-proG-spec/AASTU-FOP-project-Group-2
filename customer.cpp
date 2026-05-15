@@ -340,6 +340,37 @@ void updatePassword(MYSQL *conn, int uid)
     cout << (!mysql_query(conn, uq.c_str()) ? "\nPassword updated!\n" : "\n Update failed!\n");
 }
 
+void registerVehicle(MYSQL *conn, int currentUserId)
+{
+    cout << "REGISTER VEHICLE" << endl;
+
+    string plateNumber, vehicleType, brand, color;
+
+    cout << "\nEnter Plate Number: ";
+    cin >> plateNumber;
+    cout << "Vehicle Type (car/motorcycle/truck): ";
+    cin >> vehicleType;
+    cout << "Brand: ";
+    cin >> brand;
+    cout << "Color: ";
+    cin >> color;
+
+    string insertQuery = "INSERT INTO Vehicle (plate_number, user_id, vehicle_type, brand, color) VALUES ('";
+    insertQuery += plateNumber + "', " + to_string(currentUserId) + ", '" + vehicleType + "', '" + brand + "', '" + color + "')";
+
+    if (mysql_query(conn, insertQuery.c_str()) == 0)
+    {
+        cout << "  VEHICLE REGISTERED SUCCESSFULLY!" << endl;
+        cout << "  Plate: " << plateNumber << endl;
+        cout << "  Type: " << vehicleType << endl;
+        cout << "  Brand: " << brand << endl;
+        cout << "  Color: " << color << endl;
+    }
+    else
+    {
+        cout << "\nFailed to register vehicle: " << mysql_error(conn) << endl;
+    }
+}
 void customerDashboard(MYSQL *conn, string &user, int &uid, bool &loggedIn)
 {
     int ch;
@@ -353,9 +384,10 @@ void customerDashboard(MYSQL *conn, string &user, int &uid, bool &loggedIn)
         cout << "2. Book Parking Spot\n";
         cout << "3. Check Out & Get Invoice\n";
         cout << "4. View My Bookings\n";
-        cout << "5. My Profile\n";
-        cout << "6. Update Password\n";
-        cout << "7. Logout\n";
+        cout << "5. Register Vehicle" << endl;
+        cout << "6. My Profile\n";
+        cout << "7. Update Password\n";
+        cout << "8. Logout\n";
 
         cout << "Choice: ";
         cin >> ch;
@@ -368,10 +400,12 @@ void customerDashboard(MYSQL *conn, string &user, int &uid, bool &loggedIn)
         else if (ch == 4)
             viewMyBookings(conn, uid);
         else if (ch == 5)
-            viewMyProfile(conn, uid);
+            registerVehicle(conn, uid);
         else if (ch == 6)
-            updatePassword(conn, uid);
+            viewMyProfile(conn, uid);
         else if (ch == 7)
+            updatePassword(conn, uid);
+        else if (ch == 8)
         {
             logoutUser(user, uid, loggedIn);
             back = true;

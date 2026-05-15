@@ -13,5 +13,6 @@ void viewMyBookings(MYSQL *conn, int uid);
 void viewMyProfile(MYSQL *conn, int uid);
 void updatePassword(MYSQL *conn, int uid);
 void customerDashboard(MYSQL *conn, string &user, int &uid, bool &loggedIn);
+void registerVehicle(MYSQL *conn, int currentUserId);
 
 #endif
