@@ -1,7 +1,6 @@
 #include "utils.h"
 #include <iostream>
 #include <mysql.h>
-#include <sstream>
 
 using namespace std;
 
