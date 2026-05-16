@@ -2,8 +2,6 @@
 #include <iostream>
 #include <mysql.h>
 #include <sstream>
-#include <cstring>
-#include <ctime>
 
 using namespace std;
 
