@@ -187,7 +187,7 @@ void viewAllSlots(MYSQL *conn)
     }
     MYSQL_ROW row;
     int total = 0, available = 0, occupied = 0;
-    cout << "\nID\tSlot#\tType\tRate\tStatus\t\tOccupied\n";
+    cout << "\nID\tSlot#\tType\tRate\tStatus\tOccupied\n";
     while ((row = mysql_fetch_row(r)))
     {
         total++;
@@ -197,7 +197,7 @@ void viewAllSlots(MYSQL *conn)
             available++;
         else if (status == "occupied" || occ)
             occupied++;
-        cout << row[0] << "\t" << row[1] << "\t" << row[2] << "\t" << atof(row[3]) << "\t" << status << "\t\t" << (occ ? "Yes" : "No") << "\n";
+        cout << row[0] << "\t" << row[1] << "\t" << row[2] << "\t" << atof(row[3]) << "\t" << status << "\t" << (occ ? "Yes" : "No") << "\n";
     }
     cout << "\nSUMMARY\n";
     cout << "Total Slots: " << total << "\n";
@@ -224,10 +224,10 @@ void viewAllUsers(MYSQL *conn)
         return;
     }
     MYSQL_ROW row;
-    cout << "\nID\tName\t\tEmail\t\tPhone\t\tRole\t\tVIP\tStatus\n";
+    cout << "\nID\tName\tEmail\t\tPhone\tRole\tVIP\tStatus\n";
     while ((row = mysql_fetch_row(r)))
     {
-        cout << row[0] << "\t" << row[1] << "\t" << row[2] << "\t" << row[3] << "\t" << row[4] << "\t\t" << (atoi(row[5]) ? "Yes" : "No") << "\t" << row[6] << "\n";
+        cout << row[0] << "\t" << row[1] << "\t" << row[2] << "\t" << row[3] << "\t" << row[4] << "\t" << (atoi(row[5]) ? "Yes" : "No") << "\t" << row[6] << "\n";
     }
     mysql_free_result(r);
 }
@@ -271,11 +271,11 @@ void viewUserVehicles(MYSQL *conn)
             mysql_free_result(r);
         return;
     }
-    cout << "\nID\tPlate Number\tType\t\tBrand\t\tColor\n";
+    cout << "\nID\tPlate Number\tType\tBrand\tColor\n";
     MYSQL_ROW row;
     while ((row = mysql_fetch_row(r)))
     {
-        cout << row[0] << "\t" << row[1] << "\t\t" << row[2] << "\t\t" << row[3] << "\t\t" << row[4] << "\n";
+        cout << row[0] << "\t" << row[1] << "\t" << row[2] << "\t" << row[3] << "\t" << row[4] << "\n";
     }
     mysql_free_result(r);
 }
